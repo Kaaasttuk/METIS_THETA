@@ -528,7 +528,9 @@ def batch_ucb(regressors_list,
 
     return pd.concat(final_samples)    
 
+from logging import error
 # ECHO functions
+
 def put_volumes_to_384_wells(volumes_array, starting_well='B2', vertical=False, make_csv=False):
     """Make a dataframe as a 384 well plate for each metabolite
         
@@ -552,7 +554,7 @@ def put_volumes_to_384_wells(volumes_array, starting_well='B2', vertical=False, 
     named_volumes:
         one separate dataframe that adds well name to volume dataframe
     """
-    if len(volumes_array) > 384: raise ValueError
+    if len(volumes_array) > 294: raise ValueError
 
     all_dataframe = {}
     rows_name = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O']
@@ -674,8 +676,99 @@ def put_volumes_to_96_wells(volumes_array, starting_well='A1', vertical=False, m
                  named_volumes.index]
         named_volumes['well_name'] = names
 
+    # include code to raise error if there are not enough wells to accomodate all combinations and suggest to use 384 wells.
+
     # notice that this function output two value
     return named_volumes, all_dataframe
+
+
+# This function checks which destination plate (384 or 96) is needed to perform experiments required.
+def check_wells_capacity(volumes_array, triplicate=False, destination_plate_384_well=True):
+    """
+    Check if the number of wells needed exceeds the capacity of the specified plate.
+
+    Parameters
+    ----------
+    volumes_array: DataFrame
+        DataFrame where each column is a component and each row is the volume of that component.
+        
+    triplicate: bool
+        If True, calculates wells needed for triplicates (default is False).
+        
+    destination_plate_384_well: bool
+        If True, checks capacity for a 384-well plate. If False, checks for a 96-well plate (default is True).
+        
+    Raises
+    ------
+    ValueError
+        If the number of wells needed exceeds the capacity of the specified plate.
+    """
+    # Check the number of wells needed
+    num_combinations_per_round = volumes_array.shape[0]
+    if triplicate:
+        wells_needed = num_combinations_per_round * 3
+    else:
+        wells_needed = num_combinations_per_round
+
+    # Check if the number of wells needed exceeds the capacity of the plates.
+
+    # 384-well plate avoids using the most outer wells for reliability of the ECHO liquid handler.
+    if wells_needed > 294:
+        raise ValueError(f"Error: The number of wells needed ({wells_needed}) exceeds the capacity of a 384-well plate. Consider reducing the number of combinations or avoiding triplicates.")
+    
+    if wells_needed > 96 and not destination_plate_384_well:
+        raise ValueError(f"Error: The number of wells needed ({wells_needed}) exceeds the capacity of a 96-well plate. Use 384-well plate by setting destination_plate_384_well = True.")
+    
+    return "Destination Well Capacity is sufficient for this experiment."
+
+
+# Assign each combination to a destination well.
+def put_volumes_to_wells(volumes_array, destination_plate_384_well=True, vertical=True, triplicate=False, starting_well='A1', make_csv=False):
+    """Helper function to allocate volumes into 96 or 384 well plates with optional triplicates.
+
+    Parameters
+    ----------
+    volumes_array: 
+        DataFrame where columns are components and each row is the volume of that component (e.g., volumes.csv).
+        
+    starting_well: str
+        Name of the well to start filling (default is 'A1').
+    
+    vertical: bool
+        If True, fills the plate column by column top down. If False, fills row by row, left to right.
+        
+    Returns
+    -------
+    destination: DataFrame
+        DataFrame that includes well names added to volume data.
+    """
+
+    # Check if the number of wells needed is acceptable
+    check_wells_capacity(volumes_array, triplicate=triplicate, destination_plate_384_well=destination_plate_384_well)
+    
+    if destination_plate_384_well:
+        if not triplicate:
+            # Assign destination well for each combination on a 384-well plate.
+            destination, _ = put_volumes_to_384_wells(volumes_array, starting_well=starting_well, vertical=vertical, make_csv=make_csv)
+        else:
+            # Assign destination well for each combination and for each replicate on a 384-well plate.
+            # Starts from B2 to avoid using the most outer wells for reliability of the ECHO liquid handler.
+            replicate_1, _ = put_volumes_to_384_wells(volumes_array, starting_well='B2', vertical=vertical, make_csv=make_csv)
+            replicate_2, _ = put_volumes_to_384_wells(volumes_array, starting_well='B9', vertical=vertical, make_csv=make_csv)
+            replicate_3, _ = put_volumes_to_384_wells(volumes_array, starting_well='B16', vertical=vertical, make_csv=make_csv)
+            destination = pd.concat([replicate_1, replicate_2, replicate_3]).reset_index(drop=True)
+    else:
+        if not triplicate:
+            # Assign destination well for each combination on a 96-well plate.
+            destination, _ = put_volumes_to_96_wells(volumes_array, starting_well=starting_well, vertical=vertical, make_csv=make_csv)
+        else:
+            # Assign destination well for each combination and for each replicate on a 96-well plate.
+            replicate_1, _ = put_volumes_to_96_wells(volumes_array, starting_well='A1', vertical=vertical, make_csv=make_csv)
+            replicate_2, _ = put_volumes_to_96_wells(volumes_array, starting_well='A5', vertical=vertical, make_csv=make_csv)
+            replicate_3, _ = put_volumes_to_96_wells(volumes_array, starting_well='A9', vertical=vertical, make_csv=make_csv)
+            destination = pd.concat([replicate_1, replicate_2, replicate_3]).reset_index(drop=True)
+    
+    return destination
 
 
 # make source to destination dataframe for ECHO machine
@@ -721,43 +814,131 @@ def source_to_destination(named_volumes, desired_order=None, reset_index=True, c
 
     return all_sources, aggregated
 
+def create_ECHO_transfer_table(destination_df, source_wells_df, minimum_drop_size_nanoliter):
+    """
+    Create a transfer table for ECHO machine from source wells to destination wells.
 
-def put_volumes_to_wells(volumes_array, plate_384_well=True, vertical=True, triplicate=False, starting_well='A1', make_csv=False):
-    """it's a helper function for put_volumes_to_96_wells and put_volumes_to_384_wells that take care of creaating triplicate
-        
     Parameters
     ----------
-    volumes_array: 
-        a dataframe with columns are component, each row vol of that component (e.g. volumes.csv) 
+    destination_df: DataFrame
+        DataFrame that includes destination wells with volumes (output from put_volumes_to_wells).
         
-    starting_well: 'A1'
-        name of the well in 96 well plates that you want to start filling
-    
-    vertical:
-        if True, it will fill the plate column by column top down
-        if False, it will fill the plate row by row, left to right
+    source_wells_df: DataFrame
+        DataFrame that includes source wells with volumes (output from calculate_source_wells).
         
     Returns
     -------
-
-    named_volumes:
-        one separate dataframe that adds well name to volume dataframe
+    transfer_table_df: DataFrame
+        DataFrame that includes item, source well, destination well, and transfer volume.
     """
-    if plate_384_well:
-        if triplicate == False:
-            intermediate, _ = put_volumes_to_384_wells(volumes_array, starting_well=starting_well, vertical=vertical, make_csv=make_csv)
-        else:
-            intermediate_1, _ = put_volumes_to_384_wells(volumes_array, starting_well='B2', vertical=vertical, make_csv=make_csv)
-            intermediate_2, _ = put_volumes_to_384_wells(volumes_array, starting_well='B9', vertical=vertical, make_csv=make_csv)
-            intermediate_3, _ = put_volumes_to_384_wells(volumes_array, starting_well='B16', vertical=vertical, make_csv=make_csv)
-            intermediate = pd.concat([intermediate_1, intermediate_2, intermediate_3]).reset_index(drop=True)
-    else:
-        if triplicate == False:
-            intermediate, _ = put_volumes_to_96_wells(volumes_array, starting_well=starting_well, vertical=vertical, make_csv=make_csv)
-        else:
-            intermediate_1, _ = put_volumes_to_96_wells(volumes_array, starting_well='B2', vertical=vertical, make_csv=make_csv)
-            intermediate_2, _ = put_volumes_to_96_wells(volumes_array, starting_well='B6', vertical=vertical, make_csv=make_csv)
-            intermediate_3, _ = put_volumes_to_96_wells(volumes_array, starting_well='B10', vertical=vertical, make_csv=make_csv)
-            intermediate = pd.concat([intermediate_1, intermediate_2, intermediate_3]).reset_index(drop=True)
+    # Initialize the transfer table
+    transfer_table = []
+
+    # Iterate through each item.
+    for item in destination_df.columns:
+        if item == 'well_name':
+            continue
+        
+        # Get the source wells for the current item
+        source_rows = source_wells_df[source_wells_df['Item'] == item].reset_index(drop=True)
+        
+        # Get the destination wells for the current item
+        destination_rows = destination_df[['well_name', item]].copy()
+        destination_rows.columns = ['Destination Well', 'Transfer Volume']
+        destination_rows = destination_rows[destination_rows['Transfer Volume'] > 0].reset_index(drop=True)
+        
+        # Create the transfer rows
+        source_index = 0
+        source_volume_left = source_rows.iloc[source_index]['Volume']
+        
+        # Iterate through all destination well for this item.
+        # If there are enough volume in source well, transfer at once.
+        # If there are not enough, transfer all remaining volume of the current source well and use the next source well to complete the transfer.
+        for _, dest_row in destination_rows.iterrows():
+            transfer_volume = dest_row['Transfer Volume']
+            while transfer_volume > 0:
+                if transfer_volume <= source_volume_left:
+                    transfer_table.append({
+                        'Item': item,
+                        'Source Well': source_rows.iloc[source_index]['Source Well'],
+                        'Destination Well': dest_row['Destination Well'],
+                        'Transfer Volume': transfer_volume
+                    })
+                    source_volume_left -= transfer_volume
+                    if source_volume_left < minimum_drop_size_nanoliter:
+                      source_volume_left = 0
+                    transfer_volume = 0
+                else:
+                    transfer_table.append({
+                        'Item': item,
+                        'Source Well': source_rows.iloc[source_index]['Source Well'],
+                        'Destination Well': dest_row['Destination Well'],
+                        'Transfer Volume': source_volume_left
+                    })
+                    transfer_volume -= source_volume_left
+                    source_index += 1
+                    if source_index < len(source_rows):
+                        source_volume_left = source_rows.iloc[source_index]['Volume']
+                    else:
+                        raise ValueError(f"Not enough volume available in source wells for item {item}.")
+
+    # delete rows which has transfer volume of zero.
+    ECHO_transfer_table_df = pd.DataFrame(transfer_table)
+    ECHO_transfer_table_df = ECHO_transfer_table_df[ECHO_transfer_table_df['Transfer Volume'] > 0]
+    ECHO_transfer_table_df = ECHO_transfer_table_df.reset_index(drop=True)
     
-    return intermediate
+    return ECHO_transfer_table_df
+
+# This function assigns each iteam to source wells.
+def calculate_source_wells(volumes_df, triplicate, source_start_well):
+    if triplicate:
+        repetition = 3
+    else:
+        repetition = 1
+
+    # Initialize variables
+    max_volume_per_well = 30000
+    rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P']
+    columns = list(range(1, 25))
+    well_coordinates = [f"{row}{col}" for row in rows for col in columns]
+
+    # Find starting well index
+    start_row = source_start_well[0]
+    start_col = int(source_start_well[1:])
+    well_index = well_coordinates.index(f"{start_row}{start_col}")
+
+    source_wells = []
+
+    for substrate in volumes_df.columns:
+        # Calculate total volume needed for the substrate
+        total_volume = repetition * volumes_df[substrate].sum()
+
+        # Calculate the number of source wells needed
+        num_source_wells = math.ceil(total_volume / max_volume_per_well)
+
+        # Check if there are enough remaining wells
+        if well_index + num_source_wells > len(well_coordinates):
+            raise ValueError(f"Not enough wells available including and after the following item: {substrate}. Consider using a new source plate")
+
+        remaining_volume = total_volume
+
+        for _ in range(num_source_wells):
+            if remaining_volume >= max_volume_per_well:
+                source_wells.append({
+                    "Item": substrate,
+                    "Source Well": well_coordinates[well_index],
+                    "Volume": max_volume_per_well
+                })
+                remaining_volume -= max_volume_per_well
+            else:
+                source_wells.append({
+                    "Item": substrate,
+                    "Source Well": well_coordinates[well_index],
+                    "Volume": remaining_volume
+                })
+                remaining_volume = 0
+            well_index += 1
+
+    source_wells_df = pd.DataFrame(source_wells)
+
+    return source_wells_df

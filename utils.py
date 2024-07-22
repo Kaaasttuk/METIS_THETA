@@ -890,15 +890,14 @@ def create_ECHO_transfer_table(destination_df, source_wells_df, minimum_drop_siz
     
     return ECHO_transfer_table_df
 
-# This function assigns each iteam to source wells.
-def calculate_source_wells(volumes_df, triplicate, source_start_well):
+# This function assigns each item to source wells.
+def calculate_source_wells(volumes_df, triplicate, source_start_well, max_volume_per_well):
     if triplicate:
         repetition = 3
     else:
         repetition = 1
 
     # Initialize variables
-    max_volume_per_well = 30000
     rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P']
     columns = list(range(1, 25))
     well_coordinates = [f"{row}{col}" for row in rows for col in columns]

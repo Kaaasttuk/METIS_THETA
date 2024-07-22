@@ -683,10 +683,9 @@ def put_volumes_to_96_wells(volumes_array, starting_well='A1', vertical=False, m
     return named_volumes, all_dataframe
 
 
-# This function checks which destination plate (384 or 96) is needed to perform experiments required.
 def check_wells_capacity(volumes_array, triplicate=False, destination_plate_384_well=True):
     """
-    Check if the number of wells needed exceeds the capacity of the specified plate.
+    This function checks which destination plate (384 or 96) is needed to perform experiments required.
 
     Parameters
     ----------
@@ -723,9 +722,9 @@ def check_wells_capacity(volumes_array, triplicate=False, destination_plate_384_
     return "Destination Well Capacity is sufficient for this experiment."
 
 
-# Assign each combination to a destination well.
+
 def put_volumes_to_wells(volumes_array, destination_plate_384_well=True, vertical=True, triplicate=False, starting_well='A1', make_csv=False):
-    """Helper function to allocate volumes into 96 or 384 well plates with optional triplicates.
+    """Helper function to allocate volumes into 96 or 384 well destination plates.
 
     Parameters
     ----------
@@ -771,6 +770,81 @@ def put_volumes_to_wells(volumes_array, destination_plate_384_well=True, vertica
     
     return destination
 
+def condense_source_wells(source_wells_df):
+    """
+    Make a more readable version of source well allocation table for easier pipetting.
+
+    Parameters
+    ----------
+    source_wells_df: DataFrame
+        DataFrame that includes source wells with volumes.
+
+    Returns
+    -------
+    condensed_df: DataFrame
+        DataFrame with condensed source wells.
+    """
+    condensed_wells = []
+    current_item = None
+    current_start_well = None
+    current_end_well = None
+    current_volume = 0
+
+    def well_position(well):
+        row = well[0]
+        col = int(well[1:])
+        return (row, col)
+
+    def wells_are_contiguous(well1, well2):
+        row1, col1 = well_position(well1)
+        row2, col2 = well_position(well2)
+        return row1 == row2 and col2 == col1 + 1
+
+    for i, row in source_wells_df.iterrows():
+        item = row['Item']
+        well = row['Source Well']
+        volume = row['Volume']
+
+        if current_item is None:
+            # Initialize the first group
+            current_item = item
+            current_start_well = well
+            current_end_well = well
+            current_volume = volume
+        else:
+            if item == current_item and wells_are_contiguous(current_end_well, well):
+                # Continue the current group
+                current_end_well = well
+                current_volume += volume
+            else:
+                # Save the current group and start a new one
+                if current_start_well == current_end_well:
+                    well_range = current_start_well
+                else:
+                    well_range = f"{current_start_well}-{current_end_well}"
+                condensed_wells.append({
+                    'Item': current_item,
+                    'Well Range': well_range,
+                    'Volume': current_volume
+                })
+                current_item = item
+                current_start_well = well
+                current_end_well = well
+                current_volume = volume
+
+    # Add the last group
+    if current_start_well == current_end_well:
+        well_range = current_start_well
+    else:
+        well_range = f"{current_start_well}-{current_end_well}"
+    condensed_wells.append({
+        'Item': current_item,
+        'Well Range': well_range,
+        'Volume': current_volume
+    })
+
+    condensed_df = pd.DataFrame(condensed_wells)
+    return condensed_df
 
 # make source to destination dataframe for ECHO machine
 def source_to_destination(named_volumes, desired_order=None, reset_index=True, check_zero=False):
@@ -815,7 +889,7 @@ def source_to_destination(named_volumes, desired_order=None, reset_index=True, c
 
     return all_sources, aggregated
 
-def create_ECHO_transfer_table(destination_df, source_wells_df, minimum_drop_size_nanoliter):
+def create_ECHO_transfer_table(destination_df, source_wells_df, minimum_drop_size_nanoliter, fixed_parts=None, Master_Mix_for_fixed_parts=False):
     """
     Create a transfer table for ECHO machine from source wells to destination wells.
 
@@ -823,38 +897,51 @@ def create_ECHO_transfer_table(destination_df, source_wells_df, minimum_drop_siz
     ----------
     destination_df: DataFrame
         DataFrame that includes destination wells with volumes (output from put_volumes_to_wells).
-        
+
     source_wells_df: DataFrame
         DataFrame that includes source wells with volumes (output from calculate_source_wells).
-        
+
+    minimum_drop_size_nanoliter: int
+        Minimum drop size that can be transferred.
+
+    fixed_parts: dict
+        Dictionary of fixed parts with their corresponding proportions.
+
+    Master_Mix_for_fixed_parts: bool
+        If True, delete rows corresponding to items in fixed_parts and summarize their total volumes.
+
     Returns
     -------
-    transfer_table_df: DataFrame
+    ECHO_transfer_table_df: DataFrame
         DataFrame that includes item, source well, destination well, and transfer volume.
+    
+    fixed_parts_volumes: dict
+        Dictionary summarizing the volumes of each fixed part to be added to each destination well.
     """
     # Initialize the transfer table
     transfer_table = []
+    fixed_parts_volumes = {item: 0 for item in fixed_parts.keys()} if fixed_parts else {}
 
     # Iterate through each item.
     for item in destination_df.columns:
         if item == 'well_name':
             continue
-        
+
         # Get the source wells for the current item
         source_rows = source_wells_df[source_wells_df['Item'] == item].reset_index(drop=True)
-        
+
         # Get the destination wells for the current item
         destination_rows = destination_df[['well_name', item]].copy()
         destination_rows.columns = ['Destination Well', 'Transfer Volume']
         destination_rows = destination_rows[destination_rows['Transfer Volume'] > 0].reset_index(drop=True)
-        
+
         # Create the transfer rows
         source_index = 0
         source_volume_left = source_rows.iloc[source_index]['Volume']
-        
-        # Iterate through all destination well for this item.
-        # If there are enough volume in source well, transfer at once.
-        # If there are not enough, transfer all remaining volume of the current source well and use the next source well to complete the transfer.
+
+        # Iterate through all destination wells for this item.
+        # If there is enough volume in the source well, transfer at once.
+        # If not, transfer all remaining volume of the current source well and use the next source well to complete the transfer.
         for _, dest_row in destination_rows.iterrows():
             transfer_volume = dest_row['Transfer Volume']
             while transfer_volume > 0:
@@ -867,7 +954,7 @@ def create_ECHO_transfer_table(destination_df, source_wells_df, minimum_drop_siz
                     })
                     source_volume_left -= transfer_volume
                     if source_volume_left < minimum_drop_size_nanoliter:
-                      source_volume_left = 0
+                        source_volume_left = 0
                     transfer_volume = 0
                 else:
                     transfer_table.append({
@@ -883,12 +970,31 @@ def create_ECHO_transfer_table(destination_df, source_wells_df, minimum_drop_siz
                     else:
                         raise ValueError(f"Not enough volume available in source wells for item {item}.")
 
-    # delete rows which has transfer volume of zero.
+    # Create DataFrame and remove rows with zero transfer volume
     ECHO_transfer_table_df = pd.DataFrame(transfer_table)
     ECHO_transfer_table_df = ECHO_transfer_table_df[ECHO_transfer_table_df['Transfer Volume'] > 0]
     ECHO_transfer_table_df = ECHO_transfer_table_df.reset_index(drop=True)
-    
-    return ECHO_transfer_table_df
+
+    # Optionally delete rows corresponding to items in fixed_parts and summarize volumes for each destination well
+    if Master_Mix_for_fixed_parts and fixed_parts:
+        # Identify fixed parts items to delete
+        fixed_parts_items = set(fixed_parts.keys())
+
+        # Filter out rows where the 'Item' column is in the fixed_parts_items
+        ECHO_transfer_table_df = ECHO_transfer_table_df[~ECHO_transfer_table_df['Item'].isin(fixed_parts_items)]
+
+        # Reset index of the filtered DataFrame
+        ECHO_transfer_table_df = ECHO_transfer_table_df.reset_index(drop=True)
+
+        # Iterate through each fixed part and extract the volume for the first combination
+        for part in fixed_parts.keys():
+            if part in destination_df.columns:
+                fixed_parts_volumes[part] = destination_df.iloc[0][part]
+            else:
+                fixed_parts_volumes[part] = 0
+
+
+    return ECHO_transfer_table_df, fixed_parts_volumes
 
 # This function assigns each item to source wells.
 def calculate_source_wells(volumes_df, triplicate, source_start_well, max_volume_per_well):

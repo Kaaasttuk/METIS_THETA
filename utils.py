@@ -4,6 +4,7 @@ import pandas as pd
 import os
 from itertools import product
 from collections.abc import Iterable
+import math
 
 
 def allowed_output(value, reaction_vol_nl=20000, drop_size_nl=100, verbose=0):

@@ -1053,3 +1053,42 @@ def calculate_source_wells(volumes_df, triplicate, source_start_well, max_volume
     source_wells_df = pd.DataFrame(source_wells)
 
     return source_wells_df
+
+# This function generates a table instruction for source well pipetting.
+def source_pipetting_instructions(source_wells_df, fixed_parts, Master_Mix_for_fixed_parts=True, buffer_volume=30000):
+    """
+    Produces a pipetting instruction for your source well.
+
+    Parameters
+    ----------
+    source_wells_df: DataFrame
+        DataFrame that includes source wells with volumes.
+
+    fixed_parts: dict
+        Dictionary of fixed parts with their corresponding proportions.
+
+    Master_Mix_for_fixed_parts: bool
+        If True, delete rows corresponding to items in fixed_parts.
+
+    buffer_volume: int
+        Volume of buffer to be added to each source well.
+
+    Returns
+    -------
+    source_wells_instruction: DataFrame
+        Updated DataFrame with buffer volume, total volume columns and fixed parts removed if applicable.
+    """
+
+    # Add buffer volume column
+    source_wells_df['Buffer Volume'] = buffer_volume
+
+    # Add total volume column
+    source_wells_df['Total Volume'] = source_wells_df['Volume'] + source_wells_df['Buffer Volume']
+
+    # Remove fixed parts if Master_Mix_for_fixed_parts is True
+    if Master_Mix_for_fixed_parts:
+        fixed_parts_items = set(fixed_parts.keys())
+        source_wells_df = source_wells_df[~source_wells_df['Item'].isin(fixed_parts_items)]
+        source_wells_df = source_wells_df.reset_index(drop=True)
+
+    return source_wells_df

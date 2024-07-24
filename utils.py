@@ -688,7 +688,7 @@ def put_volumes_to_96_wells(volumes_array, starting_well='A1', vertical=False, m
     return named_volumes, all_dataframe
 
 
-def check_wells_capacity(volumes_array, triplicate=False, destination_plate_384_well=True):
+def check_wells_capacity(volumes_array, triplicate=False, destination_plate_384_well=True, vertical=True):
     """
     This function checks which destination plate (384 or 96) is needed to perform experiments required.
 
@@ -702,12 +702,12 @@ def check_wells_capacity(volumes_array, triplicate=False, destination_plate_384_
         
     destination_plate_384_well: bool
         If True, checks capacity for a 384-well plate. If False, checks for a 96-well plate (default is True).
-        
     Raises
     ------
     ValueError
         If the number of wells needed exceeds the capacity of the specified plate.
     """
+
     # Check the number of wells needed
     num_combinations_per_round = volumes_array.shape[0]
     if triplicate:
@@ -715,14 +715,18 @@ def check_wells_capacity(volumes_array, triplicate=False, destination_plate_384_
     else:
         wells_needed = num_combinations_per_round
 
-    # Check if the number of wells needed exceeds the capacity of the plates.
-
-    # 384-well plate avoids using the most outer wells for reliability of the ECHO liquid handler.
-    if wells_needed > 294:
-        raise ValueError(f"Error: The number of wells needed ({wells_needed}) exceeds the capacity of a 384-well plate. Consider reducing the number of combinations or avoiding triplicates.")
-    
     if wells_needed > 96 and not destination_plate_384_well:
-        raise ValueError(f"Error: The number of wells needed ({wells_needed}) exceeds the capacity of a 96-well plate. Use 384-well plate by setting destination_plate_384_well = True.")
+          raise ValueError(f"Error: The number of wells needed ({wells_needed}) exceeds the capacity of a 96-well plate. Use 384-well plate by setting destination_plate_384_well = True.")
+
+    if vertical:
+      # 384-well plate avoids using the most outer wells for reliability of the ECHO liquid handler.
+      if wells_needed > 294:
+          raise ValueError(f"Error: The number of wells needed ({wells_needed}) exceeds the capacity of a 384-well plate. Consider reducing the number of combinations or avoiding triplicates.")
+
+    else:
+      if wells_needed > 264:
+          raise ValueError(f"Error: The number of wells needed ({wells_needed}) exceeds the capacity of a 96-well plate. Use 384-well plate by setting destination_plate_384_well = True.If the number of combination is between 264 and 294, you can use 384 plate vertically by vertical=True")
+
     
     return "Destination Well Capacity is sufficient for this experiment."
 
@@ -757,21 +761,32 @@ def put_volumes_to_wells(volumes_array, destination_plate_384_well=True, vertica
             destination, _ = put_volumes_to_384_wells(volumes_array, starting_well=starting_well, vertical=vertical, make_csv=make_csv)
         else:
             # Assign destination well for each combination and for each replicate on a 384-well plate.
-            # Starts from B2 to avoid using the most outer wells for reliability of the ECHO liquid handler.
-            replicate_1, _ = put_volumes_to_384_wells(volumes_array, starting_well='B2', vertical=vertical, make_csv=make_csv)
-            replicate_2, _ = put_volumes_to_384_wells(volumes_array, starting_well='B9', vertical=vertical, make_csv=make_csv)
-            replicate_3, _ = put_volumes_to_384_wells(volumes_array, starting_well='B16', vertical=vertical, make_csv=make_csv)
+            # Use different starting wells based on vertical orientation.
+            if vertical:
+                replicate_1, _ = put_volumes_to_384_wells(volumes_array, starting_well='B2', vertical=vertical, make_csv=make_csv)
+                replicate_2, _ = put_volumes_to_384_wells(volumes_array, starting_well='B9', vertical=vertical, make_csv=make_csv)
+                replicate_3, _ = put_volumes_to_384_wells(volumes_array, starting_well='B16', vertical=vertical, make_csv=make_csv)
+            else:
+                replicate_1, _ = put_volumes_to_384_wells(volumes_array, starting_well='B2', vertical=vertical, make_csv=make_csv)
+                replicate_2, _ = put_volumes_to_384_wells(volumes_array, starting_well='G2', vertical=vertical, make_csv=make_csv)
+                replicate_3, _ = put_volumes_to_384_wells(volumes_array, starting_well='L2', vertical=vertical, make_csv=make_csv)
             destination = pd.concat([replicate_1, replicate_2, replicate_3]).reset_index(drop=True)
     else:
         if not triplicate:
-            # Assign destination well for each combination on a 96-well plate.
-            destination, _ = put_volumes_to_96_wells(volumes_array, starting_well=starting_well, vertical=vertical, make_csv=make_csv)
+          # Assign destination well for each combination on a 96-well plate.
+          destination, _ = put_volumes_to_96_wells(volumes_array, starting_well=starting_well, vertical=vertical, make_csv=make_csv)
         else:
-            # Assign destination well for each combination and for each replicate on a 96-well plate.
-            replicate_1, _ = put_volumes_to_96_wells(volumes_array, starting_well='A1', vertical=vertical, make_csv=make_csv)
-            replicate_2, _ = put_volumes_to_96_wells(volumes_array, starting_well='A5', vertical=vertical, make_csv=make_csv)
-            replicate_3, _ = put_volumes_to_96_wells(volumes_array, starting_well='A9', vertical=vertical, make_csv=make_csv)
-            destination = pd.concat([replicate_1, replicate_2, replicate_3]).reset_index(drop=True)
+          # Assign destination well for each combination and for each replicate on a 96-well plate.
+          # Use different starting wells based on vertical orientation.
+          if vertical:
+              replicate_1, _ = put_volumes_to_96_wells(volumes_array, starting_well='A1', vertical=vertical, make_csv=make_csv)
+              replicate_2, _ = put_volumes_to_96_wells(volumes_array, starting_well='A5', vertical=vertical, make_csv=make_csv)
+              replicate_3, _ = put_volumes_to_96_wells(volumes_array, starting_well='A9', vertical=vertical, make_csv=make_csv)
+          else:
+              replicate_1, _ = put_volumes_to_96_wells(volumes_array, starting_well='A2', vertical=vertical, make_csv=make_csv)
+              replicate_2, _ = put_volumes_to_96_wells(volumes_array, starting_well='D2', vertical=vertical, make_csv=make_csv)
+              replicate_3, _ = put_volumes_to_96_wells(volumes_array, starting_well='G2', vertical=vertical, make_csv=make_csv)
+          destination = pd.concat([replicate_1, replicate_2, replicate_3]).reset_index(drop=True)
     
     return destination
 

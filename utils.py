@@ -272,10 +272,13 @@ def concentration_to_volume(concentrations, concentrations_limits, reaction_mixt
     # stock conc should be set in a way that doesn't raise this error to avoid further debugging
     if check_water and not all(data['water'] >= 0): raise Exception("Oops, too concentrated combination!")
 
-    # check for minimum drop size
+    # Check for minimum drop size
     for column in data.columns:
         if (data[column] < minimum_drop_size_nanoliter).any():
-            raise Exception(f"Volume for item {column} is below the minimum drop size of {minimum_drop_size_nanoliter} nanoliters!")
+            # Exclude zero values from the exception check
+            if (data[column][data[column] != 0] < minimum_drop_size_nanoliter).any():
+                raise Exception(f"Volume for item {column} is below the minimum drop size of {minimum_drop_size_nanoliter} nanoliters!")
+
 
     # add alternative
     # make columns name list:
@@ -313,6 +316,7 @@ def concentration_to_volume(concentrations, concentrations_limits, reaction_mixt
 
     data_final = pd.concat([data, pd.DataFrame(Type_dic), pd.DataFrame(Stock_dic)], axis=1)
     return data_final[columns_name + list(fixed_parts.keys()) + ['water']]
+
 
 def day_finder(file, file_format='csv'):
     """Find the first notcompleted day

@@ -1001,21 +1001,9 @@ def create_ECHO_transfer_table(destination_df, source_wells_df, minimum_drop_siz
 
     # Optionally delete rows corresponding to items in fixed_parts and summarize volumes for each destination well
     if Master_Mix_for_fixed_parts and fixed_parts:
-        # Identify fixed parts items to delete
-        fixed_parts_items = set(fixed_parts.keys())
-
-        # Filter out rows where the 'Item' column is in the fixed_parts_items
-        ECHO_transfer_table_df = ECHO_transfer_table_df[~ECHO_transfer_table_df['Item'].isin(fixed_parts_items)]
-
-        # Reset index of the filtered DataFrame
-        ECHO_transfer_table_df = ECHO_transfer_table_df.reset_index(drop=True)
-
-        # Iterate through each fixed part and extract the volume for the first combination
-        for part in fixed_parts.keys():
-            if part in destination_df.columns:
-                fixed_parts_volumes[part] = destination_df.iloc[0][part]
-            else:
-                fixed_parts_volumes[part] = 0
+      # Create a new dictionary by multiplying each value in fixed_parts by final_reaction_volume_nanoliter
+      fixed_parts_volumes = {key: value * final_reaction_volume_nanoliter for key, value in fixed_parts.items()}
+        
 
 
     return ECHO_transfer_table_df, fixed_parts_volumes

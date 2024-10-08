@@ -230,7 +230,6 @@ def random_combination_generator(concentrations_limits, number_of_combination=10
     return np.array(combinations)
 
 
-
 from skopt.sampler import Hammersly
 from collections.abc import Iterable
 
@@ -249,6 +248,10 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
         A dataframe consisting of number_of_combination Hammersley-generated combinations.
     """
     
+    # Generate 5% more samples as a buffer
+    buffer_size = int(number_of_combination * 0.05)
+    total_samples_needed = number_of_combination + buffer_size
+    
     # Initialize Hammersley sampler
     sampler = Hammersly()
     
@@ -264,14 +267,16 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
             bounds.extend([(0, 1) for _ in value['Alternatives']])
 
     # Generate samples using Hammersley sampling
-    samples = sampler.generate(bounds, number_of_combination)
+    samples = sampler.generate(bounds, total_samples_needed)
     
     combinations = []
     data_point = 0
-    while data_point < number_of_combination:
+    attempt = 0  # Track the number of processed samples
+    
+    while data_point < number_of_combination and attempt < total_samples_needed:
         input_data = []
         input_vol = []
-        sample = samples[data_point]
+        sample = samples[attempt]  # Get the next sample
         sample_index = 0
         
         for key, value in concentrations_limits.items():
@@ -337,6 +342,7 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
 
         # Check for drop size constraints
         if any(vol < drop_size_nl for vol in input_vol):
+            attempt += 1
             continue  # Skip this combination if any volume is below the minimum drop size
 
         # Check for repetition and max volume constraint
@@ -356,10 +362,15 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
             combinations.append(input_data)
             data_point += 1
 
+        attempt += 1  # Increment attempt
+
         # Verbose logging
         if (data_point % 10000 == 0) and verbose:
-            print(f"Generated {data_point} combinations")
+            print(f"Generated {data_point} combinations, Attempt {attempt}")
         
+    if data_point < number_of_combination:
+        print(f"Warning: Only {data_point} combinations were generated after {attempt} attempts")
+
     # Create column names
     columns_name = []
     for key, value in concentrations_limits.items():

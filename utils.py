@@ -230,6 +230,7 @@ def random_combination_generator(concentrations_limits, number_of_combination=10
     return np.array(combinations)
 
 
+
 from skopt.sampler import Hammersly
 from collections.abc import Iterable
 
@@ -267,9 +268,10 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
     
     combinations = []
     data_point = 0
-    for sample in samples:
+    while data_point < number_of_combination:
         input_data = []
         input_vol = []
+        sample = samples[data_point]
         sample_index = 0
         
         for key, value in concentrations_limits.items():
@@ -290,9 +292,11 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
                     
                     if isinstance(value['Conc_Stock'], Iterable):
                         choice_stock, _ = find_stock(value['Conc_Values'], value['Conc_Stock'], choice_conc)
-                        input_vol.append(choice_conc / value['Conc_Stock'][choice_stock] * reaction_vol_nl)
+                        vol = choice_conc / value['Conc_Stock'][choice_stock] * reaction_vol_nl
                     else:
-                        input_vol.append(choice_conc / value['Conc_Stock'] * reaction_vol_nl)
+                        vol = choice_conc / value['Conc_Stock'] * reaction_vol_nl
+                    input_vol.append(vol)
+
                 # Without Alternatives
                 else:
                     choice_conc = value['Conc_Values'][int(round(sample[sample_index]))]
@@ -300,9 +304,11 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
                     sample_index += 1
                     if isinstance(value['Conc_Stock'], Iterable):
                         choice_stock, _ = find_stock(value['Conc_Values'], value['Conc_Stock'], choice_conc)
-                        input_vol.append(choice_conc / value['Conc_Stock'][choice_stock] * reaction_vol_nl)
+                        vol = choice_conc / value['Conc_Stock'][choice_stock] * reaction_vol_nl
                     else:
-                        input_vol.append(choice_conc / value['Conc_Stock'] * reaction_vol_nl)
+                        vol = choice_conc / value['Conc_Stock'] * reaction_vol_nl
+                    input_vol.append(vol)
+
             # Auto Concentration Value Generation
             else:
                 # With Alternatives
@@ -318,15 +324,22 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
                         sample_index += 1
                     input_data.extend(choice_list)
                     
-                    input_vol.append(recalculated_conc / value['Conc_Stock'] * reaction_vol_nl)
+                    vol = recalculated_conc / value['Conc_Stock'] * reaction_vol_nl
+                    input_vol.append(vol)
+
                 # Without Alternatives
                 else:
                     recalculated_conc = sample[sample_index]
                     input_data.append(recalculated_conc)
                     sample_index += 1
-                    input_vol.append(recalculated_conc / value['Conc_Stock'] * reaction_vol_nl)
-        
-        # Checks for repetition and volume constraints
+                    vol = recalculated_conc / value['Conc_Stock'] * reaction_vol_nl
+                    input_vol.append(vol)
+
+        # Check for drop size constraints
+        if any(vol < drop_size_nl for vol in input_vol):
+            continue  # Skip this combination if any volume is below the minimum drop size
+
+        # Check for repetition and max volume constraint
         if check_repeat and max_nl:
             if input_data not in combinations and sum(input_vol) <= max_nl:
                 combinations.append(input_data)
@@ -343,6 +356,10 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
             combinations.append(input_data)
             data_point += 1
 
+        # Verbose logging
+        if (data_point % 10000 == 0) and verbose:
+            print(f"Generated {data_point} combinations")
+        
     # Create column names
     columns_name = []
     for key, value in concentrations_limits.items():
@@ -364,6 +381,7 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
         return data
 
     return np.array(combinations)
+
 
 
 

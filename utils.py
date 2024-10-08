@@ -229,6 +229,145 @@ def random_combination_generator(concentrations_limits, number_of_combination=10
 
     return np.array(combinations)
 
+
+from skopt.sampler import Hammersly
+from collections.abc import Iterable
+
+def hammersley_initial_generator(concentrations_limits, number_of_combination=100, reaction_vol_nl=10000,
+                                 max_nl=None, drop_size_nl=100, check_repeat=True, rounded=2, verbose=0, make_csv=False, return_df=False):
+    """This function generates combinations using Hammersley sampling that are safe (e.g., don't exceed concentration limits, respect drop sizes, avoid repetition).
+    
+    Parameters
+    ----------
+    concentrations_limits: dict
+        {'name of metabolite': {'Conc_Min': #, 'Conc_Max': #, 'Conc_Values': #, 'Conc_Stock': #, 'Alternatives': #}, ...}
+        
+    Returns
+    -------
+    data: pandas.DataFrame
+        A dataframe consisting of number_of_combination Hammersley-generated combinations.
+    """
+    
+    # Initialize Hammersley sampler
+    sampler = Hammersly()
+    
+    # Define bounds for Hammersley sampling
+    bounds = []
+    for key, value in concentrations_limits.items():
+        if value['Conc_Values']:
+            bounds.append((0, len(value['Conc_Values']) - 1))
+        else:
+            bounds.append((value['Conc_Min'], value['Conc_Max']))
+    
+        if value.get('Alternatives'):
+            bounds.extend([(0, 1) for _ in value['Alternatives']])
+
+    # Generate samples using Hammersley sampling
+    samples = sampler.generate(bounds, number_of_combination)
+    
+    combinations = []
+    data_point = 0
+    for sample in samples:
+        input_data = []
+        input_vol = []
+        sample_index = 0
+        
+        for key, value in concentrations_limits.items():
+            # Manual Concentration Value Generation
+            if value['Conc_Values']:
+                # With Alternatives
+                if value.get('Alternatives'):
+                    num_alternative = len(value['Alternatives'])
+                    choice_conc = value['Conc_Values'][int(round(sample[sample_index]))]
+                    input_data.append(choice_conc)
+                    sample_index += 1
+                    
+                    choice_list = [0 for _ in range(num_alternative)]
+                    for i in range(num_alternative):
+                        choice_list[i] = int(round(sample[sample_index]))
+                        sample_index += 1
+                    input_data.extend(choice_list)
+                    
+                    if isinstance(value['Conc_Stock'], Iterable):
+                        choice_stock, _ = find_stock(value['Conc_Values'], value['Conc_Stock'], choice_conc)
+                        input_vol.append(choice_conc / value['Conc_Stock'][choice_stock] * reaction_vol_nl)
+                    else:
+                        input_vol.append(choice_conc / value['Conc_Stock'] * reaction_vol_nl)
+                # Without Alternatives
+                else:
+                    choice_conc = value['Conc_Values'][int(round(sample[sample_index]))]
+                    input_data.append(choice_conc)
+                    sample_index += 1
+                    if isinstance(value['Conc_Stock'], Iterable):
+                        choice_stock, _ = find_stock(value['Conc_Values'], value['Conc_Stock'], choice_conc)
+                        input_vol.append(choice_conc / value['Conc_Stock'][choice_stock] * reaction_vol_nl)
+                    else:
+                        input_vol.append(choice_conc / value['Conc_Stock'] * reaction_vol_nl)
+            # Auto Concentration Value Generation
+            else:
+                # With Alternatives
+                if value.get('Alternatives'):
+                    num_alternative = len(value['Alternatives'])
+                    recalculated_conc = sample[sample_index]
+                    input_data.append(recalculated_conc)
+                    sample_index += 1
+                    
+                    choice_list = [0 for _ in range(num_alternative)]
+                    for i in range(num_alternative):
+                        choice_list[i] = int(round(sample[sample_index]))
+                        sample_index += 1
+                    input_data.extend(choice_list)
+                    
+                    input_vol.append(recalculated_conc / value['Conc_Stock'] * reaction_vol_nl)
+                # Without Alternatives
+                else:
+                    recalculated_conc = sample[sample_index]
+                    input_data.append(recalculated_conc)
+                    sample_index += 1
+                    input_vol.append(recalculated_conc / value['Conc_Stock'] * reaction_vol_nl)
+        
+        # Checks for repetition and volume constraints
+        if check_repeat and max_nl:
+            if input_data not in combinations and sum(input_vol) <= max_nl:
+                combinations.append(input_data)
+                data_point += 1
+        elif check_repeat and not max_nl:
+            if input_data not in combinations:
+                combinations.append(input_data)
+                data_point += 1
+        elif not check_repeat and max_nl:
+            if sum(input_vol) <= max_nl:
+                combinations.append(input_data)
+                data_point += 1
+        else:
+            combinations.append(input_data)
+            data_point += 1
+
+    # Create column names
+    columns_name = []
+    for key, value in concentrations_limits.items():
+        if not value.get('Alternatives'):
+            columns_name.append(key)
+        else:
+            columns_name.append(key)
+            alternative_name = ['{}_{}'.format(key, i) for i in value['Alternatives']]
+            columns_name.extend(alternative_name)
+
+    # Generate CSV file if requested
+    if make_csv:
+        data = pd.DataFrame(np.array(combinations), columns=columns_name)
+        data.to_csv('Hammersley_Combination_1.csv', index=False)
+
+    # Return dataframe if requested
+    if return_df:
+        data = pd.DataFrame(np.array(combinations), columns=columns_name)
+        return data
+
+    return np.array(combinations)
+
+
+
+
 # transform concentration DataFrame to volume (nanolitre) DataFrame
 def concentration_to_volume(concentrations, concentrations_limits, reaction_mixture_vol_nl=10000,
                             fixed_parts={'Lysate': 0.33, 'Saline': 0.1}, round_deg=1, check_water=True, minimum_drop_size_nanoliter=25):

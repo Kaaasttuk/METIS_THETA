@@ -235,6 +235,7 @@ from collections.abc import Iterable
 
 
 
+
 def hammersley_initial_generator(concentrations_limits, number_of_combination=100, reaction_vol_nl=10000,
                                  max_nl=None, drop_size_nl=100, check_repeat=True, rounded=2, verbose=0, make_csv=False, return_df=False):
     """This function generates combinations using Hammersley sampling that are safe (e.g., don't exceed concentration limits, respect drop sizes, avoid repetition).
@@ -249,6 +250,7 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
     data: pandas.DataFrame
         A dataframe consisting of number_of_combination Hammersley-generated combinations.
     """
+    
     def generate_hammersley_samples(sampler, bounds, total_samples_needed):
         return sampler.generate(bounds, total_samples_needed)
 
@@ -312,11 +314,11 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
             if len(valid_combinations) >= number_of_combination:
                 break
 
-        remaining_combinations = number_of_combination - len(valid_combinations)
+        # If valid combinations exceed the required number, randomly select from them
+        if len(valid_combinations) > number_of_combination:
+            valid_combinations = random.sample(valid_combinations, number_of_combination)
 
-    # If more combinations are generated than required, randomly select the desired number
-    if len(valid_combinations) > number_of_combination:
-        valid_combinations = random.sample(valid_combinations, number_of_combination)
+        remaining_combinations = number_of_combination - len(valid_combinations)
 
     # Create column names
     columns_name = []
@@ -339,6 +341,7 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
         return data
 
     return np.array(valid_combinations)
+
 
 
 

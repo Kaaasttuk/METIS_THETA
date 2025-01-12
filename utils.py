@@ -251,12 +251,13 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
         A dataframe consisting of number_of_combination Hammersley-generated combinations.
     """
     
-    def generate_hammersley_samples(sampler, bounds, total_samples_needed):
-        return sampler.generate(bounds, total_samples_needed)
-
+    # Generate 5% more samples as a buffer
+    buffer_size = int(number_of_combination * 0.10)
+    total_samples_needed = number_of_combination + buffer_size
+    
     # Initialize Hammersley sampler
     sampler = Hammersly()
-
+    
     # Define bounds for Hammersley sampling
     bounds = []
     for key, value in concentrations_limits.items():
@@ -264,24 +265,48 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
             bounds.append((0, len(value['Conc_Values']) - 1))
         else:
             bounds.append((value['Conc_Min'], value['Conc_Max']))
+    
         if value.get('Alternatives'):
             bounds.extend([(0, 1) for _ in value['Alternatives']])
 
-    valid_combinations = []
-    remaining_combinations = number_of_combination
+    # Generate samples using Hammersley sampling
+    samples = sampler.generate(bounds, total_samples_needed)
+    
+    combinations = []
+    data_point = 0
+    attempt = 0  # Track the number of processed samples
+    
+    while data_point < number_of_combination and attempt < total_samples_needed:
+        input_data = []
+        input_vol = []
+        sample = samples[attempt]  # Get the next sample
+        sample_index = 0
+        
+        for key, value in concentrations_limits.items():
+            # Manual Concentration Value Generation
+            if value['Conc_Values']:
+                # With Alternatives
+                if value.get('Alternatives'):
+                    num_alternative = len(value['Alternatives'])
+                    choice_conc = value['Conc_Values'][int(round(sample[sample_index]))]
+                    input_data.append(choice_conc)
+                    sample_index += 1
+                    
+                    choice_list = [0 for _ in range(num_alternative)]
+                    for i in range(num_alternative):
+                        choice_list[i] = int(round(sample[sample_index]))
+                        sample_index += 1
+                    input_data.extend(choice_list)
+                    
+                    if isinstance(value['Conc_Stock'], Iterable):
+                        choice_stock, _ = find_stock(value['Conc_Values'], value['Conc_Stock'], choice_conc)
+                        vol = choice_conc / value['Conc_Stock'][choice_stock] * reaction_vol_nl
+                    else:
+                        vol = choice_conc / value['Conc_Stock'] * reaction_vol_nl
+                    input_vol.append(vol)
 
-    while len(valid_combinations) < number_of_combination:
-        # Sample 105% of the remaining combinations
-        samples_to_generate = int(1.05 * remaining_combinations)
-        samples = generate_hammersley_samples(sampler, bounds, samples_to_generate)
-
-        for sample in samples:
-            input_data = []
-            input_vol = []
-            sample_index = 0
-
-            for key, value in concentrations_limits.items():
-                if value['Conc_Values']:
+                # Without Alternatives
+                else:
                     choice_conc = value['Conc_Values'][int(round(sample[sample_index]))]
                     input_data.append(choice_conc)
                     sample_index += 1
@@ -291,6 +316,26 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
                     else:
                         vol = choice_conc / value['Conc_Stock'] * reaction_vol_nl
                     input_vol.append(vol)
+
+            # Auto Concentration Value Generation
+            else:
+                # With Alternatives
+                if value.get('Alternatives'):
+                    num_alternative = len(value['Alternatives'])
+                    recalculated_conc = sample[sample_index]
+                    input_data.append(recalculated_conc)
+                    sample_index += 1
+                    
+                    choice_list = [0 for _ in range(num_alternative)]
+                    for i in range(num_alternative):
+                        choice_list[i] = int(round(sample[sample_index]))
+                        sample_index += 1
+                    input_data.extend(choice_list)
+                    
+                    vol = recalculated_conc / value['Conc_Stock'] * reaction_vol_nl
+                    input_vol.append(vol)
+
+                # Without Alternatives
                 else:
                     recalculated_conc = sample[sample_index]
                     input_data.append(recalculated_conc)
@@ -298,27 +343,36 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
                     vol = recalculated_conc / value['Conc_Stock'] * reaction_vol_nl
                     input_vol.append(vol)
 
-            if all(vol >= drop_size_nl for vol in input_vol):  # Check constraints
-                if check_repeat and max_nl:
-                    if input_data not in valid_combinations and sum(input_vol) <= max_nl:
-                        valid_combinations.append(input_data)
-                elif check_repeat and not max_nl:
-                    if input_data not in valid_combinations:
-                        valid_combinations.append(input_data)
-                elif not check_repeat and max_nl:
-                    if sum(input_vol) <= max_nl:
-                        valid_combinations.append(input_data)
-                else:
-                    valid_combinations.append(input_data)
+        # Check for drop size constraints
+        if any(vol < drop_size_nl for vol in input_vol):
+            attempt += 1
+            continue  # Skip this combination if any volume is below the minimum drop size
 
-            if len(valid_combinations) >= number_of_combination:
-                break
+        # Check for repetition and max volume constraint
+        if check_repeat and max_nl:
+            if input_data not in combinations and sum(input_vol) <= max_nl:
+                combinations.append(input_data)
+                data_point += 1
+        elif check_repeat and not max_nl:
+            if input_data not in combinations:
+                combinations.append(input_data)
+                data_point += 1
+        elif not check_repeat and max_nl:
+            if sum(input_vol) <= max_nl:
+                combinations.append(input_data)
+                data_point += 1
+        else:
+            combinations.append(input_data)
+            data_point += 1
 
-        # If valid combinations exceed the required number, randomly select from them
-        if len(valid_combinations) > number_of_combination:
-            valid_combinations = random.sample(valid_combinations, number_of_combination)
+        attempt += 1  # Increment attempt
 
-        remaining_combinations = number_of_combination - len(valid_combinations)
+        # Verbose logging
+        if (data_point % 10000 == 0) and verbose:
+            print(f"Generated {data_point} combinations, Attempt {attempt}")
+        
+    if data_point < number_of_combination:
+        print(f"Warning: Only {data_point} combinations were generated after {attempt} attempts")
 
     # Create column names
     columns_name = []
@@ -332,15 +386,15 @@ def hammersley_initial_generator(concentrations_limits, number_of_combination=10
 
     # Generate CSV file if requested
     if make_csv:
-        data = pd.DataFrame(np.array(valid_combinations), columns=columns_name)
+        data = pd.DataFrame(np.array(combinations), columns=columns_name)
         data.to_csv('Hammersley_Combination_1.csv', index=False)
 
     # Return dataframe if requested
     if return_df:
-        data = pd.DataFrame(np.array(valid_combinations), columns=columns_name)
+        data = pd.DataFrame(np.array(combinations), columns=columns_name)
         return data
 
-    return np.array(valid_combinations)
+    return np.array(combinations)
 
 
 
